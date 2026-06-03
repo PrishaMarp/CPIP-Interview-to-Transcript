@@ -34,6 +34,8 @@ struct InputView: View {
     @State private var imageFileName: String?
     @State private var audioURL: URL?
     @State private var showAudioImporter = false
+    @State private var showTranscript = false
+    @State private var generatedTranscript = ""
 
     var body: some View {
         NavigationStack {
@@ -56,8 +58,19 @@ struct InputView: View {
                 case .audio:
                     audioSection
                 }
+                Section {
+                    Button("Transcribe") {
+                        transcribe()
+                    }
+                    .disabled(!canTranscribe)
+                } footer: {
+                    transcribeFooter
+                }
             }
             .navigationTitle("Add Input")
+            .navigationDestination(isPresented: $showTranscript) {
+                TranscriptView(transcript: generatedTranscript)
+            }
             .fileImporter(
                 isPresented: $showAudioImporter,
                 allowedContentTypes: [.audio],
@@ -71,6 +84,31 @@ struct InputView: View {
                 }
             }
         }
+    }
+
+    private var canTranscribe: Bool {
+        guard selectedType == .text else { return false }
+        return TranscriptGenerator.transcript(fromText: textInput) != nil
+    }
+
+    @ViewBuilder
+    private var transcribeFooter: some View {
+        switch selectedType {
+        case .text:
+            if textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Enter text above to transcribe.")
+            }
+        case .image, .audio:
+            Text("Image and audio transcription coming soon.")
+        }
+    }
+
+    private func transcribe() {
+        guard let transcript = TranscriptGenerator.transcript(fromText: textInput) else {
+            return
+        }
+        generatedTranscript = transcript
+        showTranscript = true
     }
 
     private var textSection: some View {
