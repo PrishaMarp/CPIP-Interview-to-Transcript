@@ -97,7 +97,7 @@ struct InputView: View {
             ) { result in
                 switch result {
                 case .success(let urls):
-                    audioURL = urls.first
+                    audioURL = urls.first.flatMap { persistImportedAudio($0) }
                 case .failure:
                     break
                 }
@@ -113,7 +113,7 @@ struct InputView: View {
         case .image:
             return selectedUIImage != nil
         case .audio:
-            return false
+            return audioURL != nil
         }
     }
 
@@ -129,7 +129,9 @@ struct InputView: View {
                 Text("Choose a photo with text to transcribe.")
             }
         case .audio:
-            Text("Audio transcription coming soon.")
+            if audioURL == nil {
+                Text("Choose an audio file to transcribe.")
+            }
         }
     }
 
@@ -163,7 +165,24 @@ struct InputView: View {
             }
 
         case .audio:
-            break
+            guard let audioURL else { return }
+            isTranscribing = true
+            Task {
+                do {
+                    let transcript = try await AudioTranscriptionService.transcript(from: audioURL)
+                    await MainActor.run {
+                        generatedTranscript = transcript
+                        isTranscribing = false
+                        showTranscript = true
+                    }
+                } catch {
+                    await MainActor.run {
+                        isTranscribing = false
+                        ocrErrorMessage = error.localizedDescription
+                        showOCRError = true
+                    }
+                }
+            }
         }
     }
 
@@ -222,6 +241,30 @@ struct InputView: View {
             }
         } header: {
             Text("Audio file")
+        }
+    }
+
+    private func persistImportedAudio(_ url: URL) -> URL? {
+        let accessGranted = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let ext = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
+
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        } catch {
+            return nil
         }
     }
 
