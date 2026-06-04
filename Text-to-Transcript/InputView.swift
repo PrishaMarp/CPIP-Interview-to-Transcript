@@ -31,11 +31,15 @@ struct InputView: View {
     @State private var textInput = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: Image?
+    @State private var selectedUIImage: UIImage?
     @State private var imageFileName: String?
     @State private var audioURL: URL?
     @State private var showAudioImporter = false
     @State private var showTranscript = false
     @State private var generatedTranscript = ""
+    @State private var isTranscribing = false
+    @State private var showOCRError = false
+    @State private var ocrErrorMessage = ""
 
     var body: some View {
         NavigationStack {
@@ -58,9 +62,19 @@ struct InputView: View {
                 case .audio:
                     audioSection
                 }
+
                 Section {
-                    Button("Transcribe") {
+                    Button {
                         transcribe()
+                    } label: {
+                        if isTranscribing {
+                            HStack {
+                                ProgressView()
+                                Text("Transcribing…")
+                            }
+                        } else {
+                            Text("Transcribe")
+                        }
                     }
                     .disabled(!canTranscribe)
                 } footer: {
@@ -70,6 +84,11 @@ struct InputView: View {
             .navigationTitle("Add Input")
             .navigationDestination(isPresented: $showTranscript) {
                 TranscriptView(transcript: generatedTranscript)
+            }
+            .alert("Transcription failed", isPresented: $showOCRError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(ocrErrorMessage)
             }
             .fileImporter(
                 isPresented: $showAudioImporter,
@@ -87,8 +106,15 @@ struct InputView: View {
     }
 
     private var canTranscribe: Bool {
-        guard selectedType == .text else { return false }
-        return TranscriptGenerator.transcript(fromText: textInput) != nil
+        if isTranscribing { return false }
+        switch selectedType {
+        case .text:
+            return TranscriptGenerator.transcript(fromText: textInput) != nil
+        case .image:
+            return selectedUIImage != nil
+        case .audio:
+            return false
+        }
     }
 
     @ViewBuilder
@@ -98,17 +124,47 @@ struct InputView: View {
             if textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("Enter text above to transcribe.")
             }
-        case .image, .audio:
-            Text("Image and audio transcription coming soon.")
+        case .image:
+            if selectedUIImage == nil {
+                Text("Choose a photo with text to transcribe.")
+            }
+        case .audio:
+            Text("Audio transcription coming soon.")
         }
     }
 
     private func transcribe() {
-        guard let transcript = TranscriptGenerator.transcript(fromText: textInput) else {
-            return
+        switch selectedType {
+        case .text:
+            guard let transcript = TranscriptGenerator.transcript(fromText: textInput) else {
+                return
+            }
+            generatedTranscript = transcript
+            showTranscript = true
+
+        case .image:
+            guard let selectedUIImage else { return }
+            isTranscribing = true
+            Task {
+                do {
+                    let transcript = try await ImageOCRService.transcript(from: selectedUIImage)
+                    await MainActor.run {
+                        generatedTranscript = transcript
+                        isTranscribing = false
+                        showTranscript = true
+                    }
+                } catch {
+                    await MainActor.run {
+                        isTranscribing = false
+                        ocrErrorMessage = error.localizedDescription
+                        showOCRError = true
+                    }
+                }
+            }
+
+        case .audio:
+            break
         }
-        generatedTranscript = transcript
-        showTranscript = true
     }
 
     private var textSection: some View {
@@ -172,6 +228,7 @@ struct InputView: View {
     private func loadImage(from item: PhotosPickerItem?) async {
         guard let item else {
             selectedImage = nil
+            selectedUIImage = nil
             imageFileName = nil
             return
         }
@@ -182,6 +239,7 @@ struct InputView: View {
         }
 
         selectedImage = Image(uiImage: uiImage)
+        selectedUIImage = uiImage
         imageFileName = "Selected image"
     }
 }
