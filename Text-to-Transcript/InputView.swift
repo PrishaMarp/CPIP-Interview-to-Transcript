@@ -37,6 +37,7 @@ struct InputView: View {
     @State private var showAudioImporter = false
     @State private var showTranscript = false
     @State private var generatedTranscript = ""
+    @State private var generatedMediaType: TranscriptMediaType = .text
     @State private var isTranscribing = false
     @State private var showOCRError = false
     @State private var ocrErrorMessage = ""
@@ -83,7 +84,7 @@ struct InputView: View {
             }
             .navigationTitle("Add Input")
             .navigationDestination(isPresented: $showTranscript) {
-                TranscriptView(transcript: generatedTranscript)
+                TranscriptView(transcript: generatedTranscript, mediaType: generatedMediaType)
             }
             .alert("Transcription failed", isPresented: $showOCRError) {
                 Button("OK", role: .cancel) {}
@@ -142,6 +143,7 @@ struct InputView: View {
                 return
             }
             generatedTranscript = transcript
+            generatedMediaType = .text
             showTranscript = true
 
         case .image:
@@ -152,6 +154,7 @@ struct InputView: View {
                     let transcript = try await ImageOCRService.transcript(from: selectedUIImage)
                     await MainActor.run {
                         generatedTranscript = transcript
+                        generatedMediaType = .photo
                         isTranscribing = false
                         showTranscript = true
                     }
@@ -172,6 +175,7 @@ struct InputView: View {
                     let transcript = try await AudioTranscriptionService.transcript(from: audioURL)
                     await MainActor.run {
                         generatedTranscript = transcript
+                        generatedMediaType = .audio
                         isTranscribing = false
                         showTranscript = true
                     }
@@ -290,4 +294,3 @@ struct InputView: View {
 #Preview {
     InputView()
 }
-
