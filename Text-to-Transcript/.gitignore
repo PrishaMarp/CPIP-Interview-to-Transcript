@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Xcode — user-specific
+xcuserdata/
+*.xcuserstate
+
+# Xcode — build artifacts
+build/
+DerivedData/
+
+# Secrets
+Text-to-Transcript/BackendSecrets.swift
+.env
+.env.*
+
+# Optional
+tessdata/
+*.traineddata
+Pods/
+BackendSecrets.swift

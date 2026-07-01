@@ -21,50 +21,118 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        ScrollView {
-            Text(transcript)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .padding()
+        ZStack {
+            AppTheme.backgroundGradient
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    mediaTypeBadge
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Transcript")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(transcript.count) chars")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(transcript)
+                            .font(.body)
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .appCard()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 120)
+            }
         }
-        .navigationTitle("Transcript")
+        .navigationTitle("Result")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             saveBar
         }
     }
 
+    private var mediaTypeBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: mediaTypeIcon)
+                .font(.caption.weight(.semibold))
+            Text(mediaTypeLabel)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(AppTheme.accent)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(AppTheme.accent.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private var mediaTypeIcon: String {
+        switch mediaType {
+        case .text: "text.alignleft"
+        case .photo: "photo"
+        case .audio: "waveform"
+        }
+    }
+
+    private var mediaTypeLabel: String {
+        switch mediaType {
+        case .text: "From Text"
+        case .photo: "From Image"
+        case .audio: "From Audio"
+        }
+    }
+
     @ViewBuilder
     private var saveBar: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             switch saveState {
             case .idle:
                 Button {
                     save()
                 } label: {
-                    Label("Save to database", systemImage: "icloud.and.arrow.up")
-                        .frame(maxWidth: .infinity)
+                    Label("Save to Database", systemImage: "icloud.and.arrow.up")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButtonStyle(isEnabled: true))
 
             case .saving:
-                ProgressView("Saving...")
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Saving…")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
 
             case .saved:
-                Label("Saved", systemImage: "checkmark.circle.fill")
+                Label("Saved successfully", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
 
             case .failed(let message):
-                VStack(spacing: 4) {
-                    Text(message)
+                VStack(spacing: 10) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
                         .foregroundStyle(.red)
-                    Button("Retry") { save() }
+                        .multilineTextAlignment(.center)
+
+                    Button("Try Again") { save() }
+                        .buttonStyle(PrimaryButtonStyle(isEnabled: true))
                 }
             }
         }
-        .padding()
-        .background(.bar)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(.ultraThinMaterial)
     }
 
     private func save() {
@@ -82,6 +150,10 @@ struct TranscriptView: View {
 
 #Preview {
     NavigationStack {
-        TranscriptView(transcript: "Sample transcript text.", mediaType: .text)
+        TranscriptView(
+            transcript: "This is a sample transcript with multiple lines of text to preview the layout.",
+            mediaType: .text
+        )
     }
 }
+

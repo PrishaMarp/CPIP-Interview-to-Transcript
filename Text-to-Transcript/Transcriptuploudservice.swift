@@ -39,14 +39,6 @@ enum TranscriptUploadError: LocalizedError {
     }
 }
 
-enum BackendConfig {
-    /// The public URL of your FastAPI backend (Railway/Render).
-    static let baseURL = URL(string: "https://YOUR-APP.up.railway.app")!
-
-    /// Must match the API_KEY environment variable set on the backend.
-    static let apiKey = "choose-a-long-random-string"
-}
-
 enum TranscriptUploadService {
 
     private struct NewTranscript: Encodable {
@@ -62,12 +54,12 @@ enum TranscriptUploadService {
         mediaType: TranscriptMediaType,
         sessionId: UUID? = nil
     ) async throws -> TranscriptUploadResponse {
-        let url = BackendConfig.baseURL.appendingPathComponent("transcripts")
+        let url = BackendSecrets.baseURL.appendingPathComponent("transcripts")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(BackendConfig.apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(BackendSecrets.apiKey, forHTTPHeaderField: "X-API-Key")
 
         let payload = NewTranscript(
             transcript_text: text,

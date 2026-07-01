@@ -24,6 +24,22 @@ enum InputContentType: String, CaseIterable, Identifiable {
         case .audio: "Audio"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .text: "text.alignleft"
+        case .image: "photo"
+        case .audio: "waveform"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .text: "Paste or type your content"
+        case .image: "Extract text from a photo"
+        case .audio: "Transcribe a recording"
+        }
+    }
 }
 
 struct InputView: View {
@@ -44,45 +60,33 @@ struct InputView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("Input type", selection: $selectedType) {
-                        ForEach(InputContentType.allCases) { type in
-                            Text(type.label).tag(type)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
+            ZStack {
+                AppTheme.backgroundGradient
+                    .ignoresSafeArea()
 
-                switch selectedType {
-                case .text:
-                    textSection
-                case .image:
-                    imageSection
-                case .audio:
-                    audioSection
-                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        header
 
-                Section {
-                    Button {
-                        transcribe()
-                    } label: {
-                        if isTranscribing {
-                            HStack {
-                                ProgressView()
-                                Text("Transcribing…")
-                            }
-                        } else {
-                            Text("Transcribe")
+                        inputTypePicker
+
+                        inputCard
+
+                        if let hint = transcribeHint {
+                            Label(hint, systemImage: "info.circle")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
                         }
+
+                        transcribeButton
                     }
-                    .disabled(!canTranscribe)
-                } footer: {
-                    transcribeFooter
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 32)
                 }
             }
-            .navigationTitle("Add Input")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showTranscript) {
                 TranscriptView(transcript: generatedTranscript, mediaType: generatedMediaType)
             }
@@ -106,6 +110,184 @@ struct InputView: View {
         }
     }
 
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(AppTheme.accent.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Interview to Transcript")
+                        .font(.title2.weight(.bold))
+                    Text("Convert text, images, or audio")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var inputTypePicker: some View {
+        HStack(spacing: 10) {
+            ForEach(InputContentType.allCases) { type in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        selectedType = type
+                    }
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: type.icon)
+                            .font(.title3.weight(.semibold))
+                        Text(type.label)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(selectedType == type ? .white : .primary)
+                    .background {
+                        if selectedType == type {
+                            LinearGradient(
+                                colors: [AppTheme.accent, AppTheme.accentSecondary],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        } else {
+                            AppTheme.subtleFill
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var inputCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(selectedType.label)
+                .font(.headline)
+            Text(selectedType.subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            switch selectedType {
+            case .text:
+                textInputArea
+            case .image:
+                imageInputArea
+            case .audio:
+                audioInputArea
+            }
+        }
+        .appCard()
+    }
+
+    private var textInputArea: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextEditor(text: $textInput)
+                .frame(minHeight: 180)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .background(AppTheme.subtleFill)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if !textInput.isEmpty {
+                Text("\(textInput.count) characters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var imageInputArea: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                ActionRow(title: "Choose Photo", systemImage: "photo.on.rectangle")
+            }
+
+            if let selectedImage {
+                selectedImage
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    }
+            }
+
+            if let imageFileName {
+                Label(imageFileName, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+        }
+        .onChange(of: selectedPhoto) { _, newItem in
+            Task {
+                await loadImage(from: newItem)
+            }
+        }
+    }
+
+    private var audioInputArea: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SecondaryActionButton(title: "Choose Audio File", systemImage: "waveform") {
+                showAudioImporter = true
+            }
+
+            if let audioURL {
+                HStack(spacing: 12) {
+                    Image(systemName: "music.note")
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.accent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Selected file")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(audioURL.lastPathComponent)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(2)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.subtleFill)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    private var transcribeButton: some View {
+        Button {
+            transcribe()
+        } label: {
+            HStack(spacing: 10) {
+                if isTranscribing {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Transcribing…")
+                } else {
+                    Image(systemName: "sparkles")
+                    Text("Transcribe")
+                }
+            }
+        }
+        .buttonStyle(PrimaryButtonStyle(isEnabled: canTranscribe))
+        .disabled(!canTranscribe)
+    }
+
     private var canTranscribe: Bool {
         if isTranscribing { return false }
         switch selectedType {
@@ -118,21 +300,23 @@ struct InputView: View {
         }
     }
 
-    @ViewBuilder
-    private var transcribeFooter: some View {
+    private var transcribeHint: String? {
         switch selectedType {
         case .text:
             if textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Enter text above to transcribe.")
+                return "Enter text above to transcribe."
             }
+            return nil
         case .image:
             if selectedUIImage == nil {
-                Text("Choose a photo with text to transcribe.")
+                return "Choose a photo with clear, readable text."
             }
+            return nil
         case .audio:
             if audioURL == nil {
-                Text("Choose an audio file to transcribe.")
+                return "Choose an audio file to transcribe."
             }
+            return nil
         }
     }
 
@@ -190,64 +374,6 @@ struct InputView: View {
         }
     }
 
-    private var textSection: some View {
-        Section {
-            TextEditor(text: $textInput)
-                .frame(minHeight: 160)
-        } header: {
-            Text("Text")
-        } footer: {
-            if !textInput.isEmpty {
-                Text("\(textInput.count) characters")
-            }
-        }
-    }
-
-    private var imageSection: some View {
-        Section {
-            PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                Label("Choose Photo", systemImage: "photo.on.rectangle")
-            }
-
-            if let selectedImage {
-                selectedImage
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-
-            if let imageFileName {
-                Text(imageFileName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Image")
-        }
-        .onChange(of: selectedPhoto) { _, newItem in
-            Task {
-                await loadImage(from: newItem)
-            }
-        }
-    }
-
-    private var audioSection: some View {
-        Section {
-            Button {
-                showAudioImporter = true
-            } label: {
-                Label("Choose Audio File", systemImage: "waveform")
-            }
-
-            if let audioURL {
-                LabeledContent("File", value: audioURL.lastPathComponent)
-            }
-        } header: {
-            Text("Audio file")
-        }
-    }
-
     private func persistImportedAudio(_ url: URL) -> URL? {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
@@ -287,10 +413,11 @@ struct InputView: View {
 
         selectedImage = Image(uiImage: uiImage)
         selectedUIImage = uiImage
-        imageFileName = "Selected image"
+        imageFileName = "Photo ready"
     }
 }
 
 #Preview {
     InputView()
 }
+
