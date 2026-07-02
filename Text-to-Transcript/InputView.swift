@@ -35,22 +35,39 @@ enum InputContentType: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .text: "Paste or type your content"
+        case .text: "Type notes or import a Google Doc"
         case .image: "Extract text from a photo"
         case .audio: "Transcribe a recording"
         }
     }
 }
 
+private enum TextEntryMode: String, CaseIterable, Identifiable {
+    case type
+    case importDocument
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .type: "Type"
+        case .importDocument: "Google Doc"
+        }
+    }
+}
+
 struct InputView: View {
     @State private var selectedType: InputContentType = .text
+    @State private var textEntryMode: TextEntryMode = .type
     @State private var textInput = ""
+    @State private var importedDocumentName: String?
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: Image?
     @State private var selectedUIImage: UIImage?
     @State private var imageFileName: String?
     @State private var audioURL: URL?
     @State private var showAudioImporter = false
+    @State private var showDocumentImporter = false
     @State private var showTranscript = false
     @State private var generatedTranscript = ""
     @State private var generatedMediaType: TranscriptMediaType = .text
@@ -90,7 +107,7 @@ struct InputView: View {
             .navigationDestination(isPresented: $showTranscript) {
                 TranscriptView(transcript: generatedTranscript, mediaType: generatedMediaType)
             }
-            .alert("Transcription failed", isPresented: $showOCRError) {
+            .alert("Something went wrong", isPresented: $showOCRError) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(ocrErrorMessage)
@@ -102,7 +119,20 @@ struct InputView: View {
             ) { result in
                 switch result {
                 case .success(let urls):
-                    audioURL = urls.first.flatMap { persistImportedAudio($0) }
+                    audioURL = urls.first.flatMap { persistImportedFile($0, defaultExtension: "m4a") }
+                case .failure:
+                    break
+                }
+            }
+            .fileImporter(
+                isPresented: $showDocumentImporter,
+                allowedContentTypes: DocumentTextLoader.supportedTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    importDocument(from: url)
                 case .failure:
                     break
                 }
@@ -191,19 +221,150 @@ struct InputView: View {
     }
 
     private var textInputArea: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextEditor(text: $textInput)
-                .frame(minHeight: 180)
-                .scrollContentBackground(.hidden)
-                .padding(10)
-                .background(AppTheme.subtleFill)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        VStack(alignment: .leading, spacing: 14) {
+            textEntryModePicker
+
+            switch textEntryMode {
+            case .type:
+                typeTextArea
+            case .importDocument:
+                importDocumentArea
+            }
 
             if !textInput.isEmpty {
-                Text("\(textInput.count) characters")
+                HStack {
+                    Text("\(textInput.count) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear") {
+                        textInput = ""
+                        importedDocumentName = nil
+                    }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.accent)
+                }
             }
+        }
+    }
+
+    private var textEntryModePicker: some View {
+        HStack(spacing: 10) {
+            ForEach(TextEntryMode.allCases) { mode in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        textEntryMode = mode
+                    }
+                } label: {
+                    Text(mode.label)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(textEntryMode == mode ? .white : .primary)
+                        .background {
+                            if textEntryMode == mode {
+                                LinearGradient(
+                                    colors: [AppTheme.accent, AppTheme.accentSecondary],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            } else {
+                                AppTheme.subtleFill
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var typeTextArea: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Type or paste interview notes")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ZStack(alignment: .topLeading) {
+                if textInput.isEmpty {
+                    Text("Start typing here…")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 18)
+                }
+
+                TextEditor(text: $textInput)
+                    .frame(minHeight: 200)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .onChange(of: textInput) { _, _ in
+                        importedDocumentName = nil
+                    }
+            }
+            .background(AppTheme.subtleFill)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var importDocumentArea: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SecondaryActionButton(title: "Import Google Doc", systemImage: "doc.richtext") {
+                showDocumentImporter = true
+            }
+
+            googleDocsHelp
+
+            if let importedDocumentName {
+                Label(importedDocumentName, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
+            if !textInput.isEmpty {
+                Text("Preview")
+                    .font(.subheadline.weight(.medium))
+
+                Text(textInput)
+                    .font(.body)
+                    .lineLimit(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(AppTheme.subtleFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    private var googleDocsHelp: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("How to import from Google Docs", systemImage: "info.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text("Supported formats: .docx, .pdf, and .txt")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("From Google Docs: File → Download → Word (.docx), PDF (.pdf), or Plain text (.txt).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.accent.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func importDocument(from url: URL) {
+        do {
+            let defaultExt = url.pathExtension.isEmpty ? "docx" : url.pathExtension
+            let localURL = persistImportedFile(url, defaultExtension: defaultExt) ?? url
+            textInput = try DocumentTextLoader.loadText(from: localURL)
+            importedDocumentName = url.lastPathComponent
+            textEntryMode = .importDocument
+        } catch {
+            ocrErrorMessage = error.localizedDescription
+            showOCRError = true
         }
     }
 
@@ -304,7 +465,9 @@ struct InputView: View {
         switch selectedType {
         case .text:
             if textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return "Enter text above to transcribe."
+                return textEntryMode == .importDocument
+                    ? "Import a .docx, .pdf, or .txt file to continue."
+                    : "Type or paste text to continue."
             }
             return nil
         case .image:
@@ -374,7 +537,7 @@ struct InputView: View {
         }
     }
 
-    private func persistImportedAudio(_ url: URL) -> URL? {
+    private func persistImportedFile(_ url: URL, defaultExtension: String) -> URL? {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
             if accessGranted {
@@ -382,7 +545,7 @@ struct InputView: View {
             }
         }
 
-        let ext = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+        let ext = url.pathExtension.isEmpty ? defaultExtension : url.pathExtension
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(ext)
@@ -420,4 +583,5 @@ struct InputView: View {
 #Preview {
     InputView()
 }
+
 
