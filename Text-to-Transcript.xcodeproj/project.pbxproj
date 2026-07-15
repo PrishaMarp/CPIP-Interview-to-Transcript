@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D7781AD22FD0E95500F380E2 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D7781AD12FD0E95500F380E2 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		D7781AAB2FD0E95500F380E2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7781AD22FD0E95500F380E2 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = "Text-to-Transcript";
 			packageProductDependencies = (
+				D7781AD12FD0E95500F380E2 /* Supabase */,
 			);
 			productName = "Text-to-Transcript";
 			productReference = D7781A9D2FD0E95300F380E2 /* Text-to-Transcript.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = D7781A942FD0E95300F380E2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D7781AD02FD0E95500F380E2 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D7781A9E2FD0E95300F380E2 /* Products */;
 			projectDirPath = "";
@@ -588,6 +597,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D7781AD02FD0E95500F380E2 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D7781AD12FD0E95500F380E2 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D7781AD02FD0E95500F380E2 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D7781A952FD0E95300F380E2 /* Project object */;
 }

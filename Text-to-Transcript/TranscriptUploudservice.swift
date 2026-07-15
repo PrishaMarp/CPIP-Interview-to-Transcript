@@ -4,88 +4,108 @@
 //
 
 import Foundation
+import Supabase
 
-/// Mirrors the `media_type_enum` Postgres type.
-enum TranscriptMediaType: String {
+/// Matches the `media.media_type` values used by the existing schema.
+enum TranscriptMediaType: String, Encodable {
     case text
     case photo
     case audio
 }
 
-struct TranscriptUploadResponse: Decodable {
+struct TranscriptUploadResponse {
     let sessionId: UUID
     let mediaId: UUID
-
-    enum CodingKeys: String, CodingKey {
-        case sessionId = "session_id"
-        case mediaId = "media_id"
-    }
 }
 
 enum TranscriptUploadError: LocalizedError {
-    case requestFailed(Error)
-    case serverError(Int)
-    case decodingFailed(Error)
+    case notAuthenticated
+    case insertFailed(Error)
 
     var errorDescription: String? {
         switch self {
-        case .requestFailed(let error):
-            "Network request failed: \(error.localizedDescription)"
-        case .serverError(let code):
-            "Server returned an error (\(code))."
-        case .decodingFailed(let error):
-            "Could not read server response: \(error.localizedDescription)"
+        case .notAuthenticated:
+            "Could not sign in to save this transcript."
+        case .insertFailed(let error):
+            "Could not save transcript: \(error.localizedDescription)"
         }
     }
 }
 
 enum TranscriptUploadService {
 
-    private struct NewTranscript: Encodable {
-        let transcript_text: String
-        let media_type: String
-        let session_id: String?
+    private struct NewSession: Encodable {
+        let status: String
     }
 
-    /// Sends the transcript to the FastAPI backend, which creates a
-    /// session (if needed) and a linked media row in Supabase.
+    private struct SessionRow: Decodable {
+        let id: UUID
+    }
+
+    private struct NewMedia: Encodable {
+        let session_id: UUID
+        let media_type: String
+        let transcript_text: String
+        let processing_status: String
+    }
+
+    private struct MediaRow: Decodable {
+        let id: UUID
+        let session_id: UUID
+    }
+
+    /// Creates a `sessions` row, then inserts the transcript into `media`.
+    /// Railway is no longer involved — a Supabase webhook can call `/extract` after the media insert.
+    @discardableResult
     static func saveTranscript(
         _ text: String,
         mediaType: TranscriptMediaType,
         sessionId: UUID? = nil
     ) async throws -> TranscriptUploadResponse {
-        let url = BackendSecrets.baseURL.appendingPathComponent("transcripts")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(BackendSecrets.apiKey, forHTTPHeaderField: "X-API-Key")
-
-        let payload = NewTranscript(
-            transcript_text: text,
-            media_type: mediaType.rawValue,
-            session_id: sessionId?.uuidString
-        )
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let data: Data
-        let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            try await SupabaseClientProvider.ensureAuthenticated()
         } catch {
-            throw TranscriptUploadError.requestFailed(error)
+            throw TranscriptUploadError.notAuthenticated
         }
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw TranscriptUploadError.serverError(code)
-        }
+        let client = SupabaseClientProvider.client
 
         do {
-            return try JSONDecoder().decode(TranscriptUploadResponse.self, from: data)
+            let resolvedSessionID: UUID
+            if let sessionId {
+                resolvedSessionID = sessionId
+            } else {
+                let session: SessionRow = try await client
+                    .from("sessions")
+                    .insert(NewSession(status: "pending"))
+                    .select("id")
+                    .single()
+                    .execute()
+                    .value
+                resolvedSessionID = session.id
+            }
+
+            let media: MediaRow = try await client
+                .from("media")
+                .insert(
+                    NewMedia(
+                        session_id: resolvedSessionID,
+                        media_type: mediaType.rawValue,
+                        transcript_text: text,
+                        processing_status: "pending"
+                    )
+                )
+                .select("id, session_id")
+                .single()
+                .execute()
+                .value
+
+            return TranscriptUploadResponse(
+                sessionId: media.session_id,
+                mediaId: media.id
+            )
         } catch {
-            throw TranscriptUploadError.decodingFailed(error)
+            throw TranscriptUploadError.insertFailed(error)
         }
     }
 }

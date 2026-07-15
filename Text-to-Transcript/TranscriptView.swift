@@ -172,7 +172,7 @@ struct TranscriptView: View {
         saveState = .saving
         Task {
             do {
-                _ = try await TranscriptUploadService.saveTranscript(trimmed, mediaType: mediaType)
+                try await TranscriptUploadService.saveTranscript(trimmed, mediaType: mediaType)
                 saveState = .saved
             } catch {
                 saveState = .failed(error.localizedDescription)
