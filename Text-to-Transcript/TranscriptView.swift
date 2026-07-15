@@ -8,10 +8,16 @@
 import SwiftUI
 
 struct TranscriptView: View {
-    let transcript: String
     let mediaType: TranscriptMediaType
 
+    @State private var editableTranscript: String
+    @State private var isEditing = false
     @State private var saveState: SaveState = .idle
+
+    init(transcript: String, mediaType: TranscriptMediaType) {
+        self.mediaType = mediaType
+        _editableTranscript = State(initialValue: transcript)
+    }
 
     private enum SaveState: Equatable {
         case idle
@@ -34,16 +40,27 @@ struct TranscriptView: View {
                             Text("Transcript")
                                 .font(.headline)
                             Spacer()
-                            Text("\(transcript.count) chars")
+                            Text("\(editableTranscript.count) chars")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        Text(transcript)
-                            .font(.body)
-                            .lineSpacing(5)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                        if isEditing {
+                            TextEditor(text: $editableTranscript)
+                                .font(.body)
+                                .lineSpacing(5)
+                                .frame(minHeight: 240)
+                                .scrollContentBackground(.hidden)
+                                .padding(8)
+                                .background(AppTheme.subtleFill)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        } else {
+                            Text(editableTranscript)
+                                .font(.body)
+                                .lineSpacing(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
                     }
                     .appCard()
                 }
@@ -54,6 +71,16 @@ struct TranscriptView: View {
         }
         .navigationTitle("Result")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(isEditing ? "Done" : "Edit") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isEditing.toggle()
+                    }
+                }
+                .fontWeight(.semibold)
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             saveBar
         }
@@ -136,10 +163,16 @@ struct TranscriptView: View {
     }
 
     private func save() {
+        let trimmed = editableTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            saveState = .failed("Transcript cannot be empty.")
+            return
+        }
+
         saveState = .saving
         Task {
             do {
-                _ = try await TranscriptUploadService.saveTranscript(transcript, mediaType: mediaType)
+                _ = try await TranscriptUploadService.saveTranscript(trimmed, mediaType: mediaType)
                 saveState = .saved
             } catch {
                 saveState = .failed(error.localizedDescription)
@@ -156,4 +189,5 @@ struct TranscriptView: View {
         )
     }
 }
+
 

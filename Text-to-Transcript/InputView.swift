@@ -36,8 +36,8 @@ enum InputContentType: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .text: "Type notes or import a Google Doc"
-        case .image: "Extract text from a photo"
-        case .audio: "Transcribe a recording"
+        case .image: "Capture or choose a photo"
+        case .audio: "Record or import audio"
         }
     }
 }
@@ -57,6 +57,7 @@ private enum TextEntryMode: String, CaseIterable, Identifiable {
 }
 
 struct InputView: View {
+    @StateObject private var audioRecorder = AudioRecorder()
     @State private var selectedType: InputContentType = .text
     @State private var textEntryMode: TextEntryMode = .type
     @State private var textInput = ""
@@ -67,13 +68,19 @@ struct InputView: View {
     @State private var imageFileName: String?
     @State private var audioURL: URL?
     @State private var showAudioImporter = false
+    @State private var showAudioExporter = false
+    @State private var audioExportURL: URL?
     @State private var showDocumentImporter = false
+    @State private var showCamera = false
     @State private var showTranscript = false
     @State private var generatedTranscript = ""
     @State private var generatedMediaType: TranscriptMediaType = .text
     @State private var isTranscribing = false
     @State private var showOCRError = false
     @State private var ocrErrorMessage = ""
+    @State private var showSaveSuccess = false
+    @State private var saveSuccessMessage = ""
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -112,16 +119,25 @@ struct InputView: View {
             } message: {
                 Text(ocrErrorMessage)
             }
-            .fileImporter(
-                isPresented: $showAudioImporter,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    audioURL = urls.first.flatMap { persistImportedFile($0, defaultExtension: "m4a") }
-                case .failure:
-                    break
+            .alert("Saved", isPresented: $showSaveSuccess) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveSuccessMessage)
+            }
+            .sheet(isPresented: $showAudioImporter) {
+                AudioDocumentPicker { url in
+                    importAudio(from: url)
+                }
+            }
+            .sheet(isPresented: $showAudioExporter) {
+                if let audioExportURL {
+                    AudioExportPicker(sourceURL: audioExportURL) { didSave in
+                        if didSave {
+                            saveSuccessMessage = "Recording saved to the location you chose (e.g. Downloads)."
+                            showSaveSuccess = true
+                        }
+                        self.audioExportURL = nil
+                    }
                 }
             }
             .fileImporter(
@@ -136,6 +152,15 @@ struct InputView: View {
                 case .failure:
                     break
                 }
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraImagePicker { image in
+                    selectedPhoto = nil
+                    selectedImage = Image(uiImage: image)
+                    selectedUIImage = image
+                    imageFileName = "Captured photo"
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -358,7 +383,7 @@ struct InputView: View {
     private func importDocument(from url: URL) {
         do {
             let defaultExt = url.pathExtension.isEmpty ? "docx" : url.pathExtension
-            let localURL = persistImportedFile(url, defaultExtension: defaultExt) ?? url
+            let localURL = try persistImportedFile(url, defaultExtension: defaultExt)
             textInput = try DocumentTextLoader.loadText(from: localURL)
             importedDocumentName = url.lastPathComponent
             textEntryMode = .importDocument
@@ -368,10 +393,26 @@ struct InputView: View {
         }
     }
 
+    private func importAudio(from url: URL) {
+        do {
+            audioRecorder.reset()
+            audioURL = try persistImportedFile(url, defaultExtension: "m4a")
+        } catch {
+            ocrErrorMessage = error.localizedDescription
+            showOCRError = true
+        }
+    }
+
     private var imageInputArea: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                SecondaryActionButton(title: "Take Photo", systemImage: "camera") {
+                    showCamera = true
+                }
+            }
+
             PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                ActionRow(title: "Choose Photo", systemImage: "photo.on.rectangle")
+                ActionRow(title: "Choose from Library", systemImage: "photo.on.rectangle")
             }
 
             if let selectedImage {
@@ -384,6 +425,11 @@ struct InputView: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                     }
+
+                SecondaryActionButton(title: "Save to Photos", systemImage: "square.and.arrow.down") {
+                    Task { await saveImageLocally() }
+                }
+                .disabled(isSaving)
             }
 
             if let imageFileName {
@@ -401,31 +447,98 @@ struct InputView: View {
 
     private var audioInputArea: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SecondaryActionButton(title: "Choose Audio File", systemImage: "waveform") {
+            recordingControls
+
+            SecondaryActionButton(title: "Import Audio File", systemImage: "folder") {
                 showAudioImporter = true
             }
 
             if let audioURL {
-                HStack(spacing: 12) {
-                    Image(systemName: "music.note")
-                        .foregroundStyle(AppTheme.accent)
-                        .frame(width: 36, height: 36)
-                        .background(AppTheme.accent.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                audioFileRow(url: audioURL, label: "Ready to transcribe")
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Selected file")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(audioURL.lastPathComponent)
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(2)
-                    }
+                SecondaryActionButton(title: "Save Recording", systemImage: "square.and.arrow.down") {
+                    saveAudioLocally(from: audioURL)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppTheme.subtleFill)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .disabled(isSaving || audioRecorder.isRecording)
+            }
+        }
+    }
+
+    private var recordingControls: some View {
+        HStack(spacing: 12) {
+            Image(systemName: audioRecorder.isRecording ? "mic.fill" : "mic")
+                .foregroundStyle(audioRecorder.isRecording ? .red : AppTheme.accent)
+                .frame(width: 36, height: 36)
+                .background((audioRecorder.isRecording ? Color.red : AppTheme.accent).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(audioRecorder.isRecording ? "Recording…" : "Record Interview")
+                    .font(.subheadline.weight(.medium))
+                Text(audioRecorder.isRecording ? audioRecorder.formattedElapsed : "Tap Record to capture live audio")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await toggleRecording() }
+            } label: {
+                Text(audioRecorder.isRecording ? "Stop" : "Record")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(audioRecorder.isRecording ? Color.red : AppTheme.accent)
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(12)
+        .background(AppTheme.subtleFill)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func audioFileRow(url: URL, label: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "waveform")
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 36, height: 36)
+                .background(AppTheme.accent.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(url.lastPathComponent)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.subtleFill)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func toggleRecording() async {
+        if audioRecorder.isRecording {
+            audioRecorder.stop()
+            if let url = audioRecorder.recordingFileURL() {
+                audioURL = url
+            } else {
+                audioURL = nil
+                ocrErrorMessage = "Recording could not be saved. Please try again."
+                showOCRError = true
+            }
+        } else {
+            do {
+                try await audioRecorder.start()
+                audioURL = nil
+            } catch {
+                ocrErrorMessage = error.localizedDescription
+                showOCRError = true
             }
         }
     }
@@ -457,7 +570,7 @@ struct InputView: View {
         case .image:
             return selectedUIImage != nil
         case .audio:
-            return audioURL != nil
+            return audioURL != nil && !audioRecorder.isRecording
         }
     }
 
@@ -472,12 +585,12 @@ struct InputView: View {
             return nil
         case .image:
             if selectedUIImage == nil {
-                return "Choose a photo with clear, readable text."
+                return "Take a photo or choose one from your library."
             }
             return nil
         case .audio:
-            if audioURL == nil {
-                return "Choose an audio file to transcribe."
+            if audioURL == nil && !audioRecorder.isRecording {
+                return "Record live audio or import a file to transcribe."
             }
             return nil
         }
@@ -537,7 +650,37 @@ struct InputView: View {
         }
     }
 
-    private func persistImportedFile(_ url: URL, defaultExtension: String) -> URL? {
+    private func saveImageLocally() async {
+        guard let selectedUIImage else { return }
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            try await LocalMediaSaver.saveImageToPhotoLibrary(selectedUIImage)
+            saveSuccessMessage = "Image saved to your Photos library."
+            showSaveSuccess = true
+        } catch {
+            ocrErrorMessage = error.localizedDescription
+            showOCRError = true
+        }
+    }
+
+    private func saveAudioLocally(from url: URL) {
+        isSaving = true
+        defer { isSaving = false }
+
+        let sourceURL = audioRecorder.recordingFileURL() ?? url
+
+        do {
+            audioExportURL = try LocalMediaSaver.preparedAudioExportURL(from: sourceURL)
+            showAudioExporter = true
+        } catch {
+            ocrErrorMessage = error.localizedDescription
+            showOCRError = true
+        }
+    }
+
+    private func persistImportedFile(_ url: URL, defaultExtension: String) throws -> URL {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
             if accessGranted {
@@ -550,15 +693,11 @@ struct InputView: View {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(ext)
 
-        do {
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.copyItem(at: url, to: destination)
-            return destination
-        } catch {
-            return nil
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
         }
+        try FileManager.default.copyItem(at: url, to: destination)
+        return destination
     }
 
     private func loadImage(from item: PhotosPickerItem?) async {
@@ -583,5 +722,6 @@ struct InputView: View {
 #Preview {
     InputView()
 }
+
 
 

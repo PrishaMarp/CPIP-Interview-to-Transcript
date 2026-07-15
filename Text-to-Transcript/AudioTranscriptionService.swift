@@ -186,18 +186,28 @@ enum AudioTranscriptionService {
         exportSession.outputFileType = .m4a
         exportSession.shouldOptimizeForNetworkUse = true
 
-        await withCheckedContinuation { continuation in
-            exportSession.exportAsynchronously {
-                continuation.resume()
+        if #available(iOS 18.0, *) {
+            do {
+                try await exportSession.export(to: destination, as: .m4a)
+                return destination
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                return url
             }
-        }
+        } else {
+            await withCheckedContinuation { continuation in
+                exportSession.exportAsynchronously {
+                    continuation.resume()
+                }
+            }
 
-        guard exportSession.status == .completed else {
-            try? FileManager.default.removeItem(at: destination)
-            return url
-        }
+            guard exportSession.status == .completed else {
+                try? FileManager.default.removeItem(at: destination)
+                return url
+            }
 
-        return destination
+            return destination
+        }
     }
 
     // MARK: - Authorization & file access
@@ -245,4 +255,5 @@ enum AudioTranscriptionService {
         return destination
     }
 }
+
 
