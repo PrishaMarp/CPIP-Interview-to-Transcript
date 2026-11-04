@@ -42,7 +42,8 @@ final class AudioRecorder: ObservableObject {
         }
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        // Measurement mode skips the voice processing that can muffle an interview recording.
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
         try session.setActive(true)
 
         try FileManager.default.createDirectory(
@@ -58,7 +59,8 @@ final class AudioRecorder: ObservableObject {
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: 44_100,
             AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            AVEncoderBitRateKey: 128_000,
+            AVEncoderAudioQualityKey: AVAudioQuality.max.rawValue
         ]
 
         recorder = try AVAudioRecorder(url: url, settings: settings)
